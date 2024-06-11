@@ -33,7 +33,7 @@ class unipose(nn.Module):
         return x
 
 
-def benchmark_model(model, device, batch_size=32, num_repeats=100):
+def benchmark_model(model, device, batch_size=32, num_repeats=1):
     # Create a dummy input tensor
     input_tensor = torch.randn(batch_size, 3, 368, 368).to(device)
     model.eval()
@@ -45,7 +45,11 @@ def benchmark_model(model, device, batch_size=32, num_repeats=100):
     torch.cuda.synchronize()
     start_event.record()
 
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        record_shapes=True,
+        with_stack=True  # Ensure stack tracing is enabled
+    ) as prof:
         with record_function("model_inference"):
             for _ in range(num_repeats):
                 _ = model(input_tensor)
@@ -54,9 +58,14 @@ def benchmark_model(model, device, batch_size=32, num_repeats=100):
     torch.cuda.synchronize()
     elapsed_time = start_event.elapsed_time(end_event)  # convert milliseconds
 
-    throughput = num_repeats / (elapsed_time/1000) 
+    throughput = num_repeats / (elapsed_time / 1000)
     print(f"Throughput: {throughput:.2f} inferences per second")
 
+    # Save the profiling results to a JSON file in the Chrome trace format
+    prof.export_chrome_trace("/content/hagrid/unipose-profiling-/unipose_profiling.json")
+    print("Profiler results exported to unipose_profiling.json")
+
+    # Print profiling results to console
     print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=100))
 
     return throughput
@@ -64,27 +73,18 @@ def benchmark_model(model, device, batch_size=32, num_repeats=100):
 
 def main():
     batch_size = 32
-    num_repeats = 100
-    output_json = None  # Replace with your desired output path if needed
+    num_repeats = 1
+    output_json = '/content/hagrid/unipose-profiling-/unipose_profiling.json'  # Replace with your desired output path if needed
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     model = unipose(num_classes=15).to(device)
-    model.load_state_dict(torch.load('/home/ps332/myViT/UniPose/UniPose_MPII.pth', map_location=device))
+    model.load_state_dict(torch.load('/content/gdrive/MyDrive/UniPose_MPII.pth', map_location=device))
 
     # Benchmark the model
     throughput = benchmark_model(model, device, batch_size, num_repeats)
 
-    output_data_dict = {
-        "batch_size": batch_size,
-        "num_repeats": num_repeats,
-        "throughput": throughput
-    }
-
-    if output_json:
-        with open(output_json, "w") as f:
-            json.dump(output_data_dict, f, indent=4)
-        print(f"Results saved to {output_json}")
+    print(f"Results saved to {output_json}")
 
 
 if __name__ == '__main__':
